@@ -38,36 +38,40 @@ pub fn execute_cgi(
     peer_port: u16,
     server_port: u16,
 ) -> HttpResponse {
-    let mut env: HashMap<String, String> = HashMap::new();
+    let mut environment: HashMap<String, String> = HashMap::new();
 
     // RFC 3875 environment variables populated
-    env.insert("REQUEST_METHOD".into(), match request.method {
-        crate::request::Method::Get => "GET".into(),
-        crate::request::Method::Post => "POST".into(),
-    });
-    env.insert(
+    environment.insert("REQUEST_METHOD".into(), 
+        match request.method {
+            crate::request::Method::Get => "GET".into(),
+            crate::request::Method::Post => "POST".into(),
+        }
+    );
+    environment.insert(
         "QUERY_STRING".into(),
         request.query_string().unwrap_or("").to_string(),
     );
-    env.insert("SERVER_NAME".into(), vhost.server_name.clone());
-    env.insert("SERVER_PORT".into(), server_port.to_string());
-    env.insert("SERVER_PROTOCOL".into(), "HTTP/1.1".into());
-    env.insert(
+    environment.insert("SERVER_NAME".into(), vhost.server_name.clone());
+    environment.insert("SERVER_PORT".into(), server_port.to_string());
+    environment.insert("SERVER_PROTOCOL".into(), "HTTP/1.1".into());
+    environment.insert(
         "SERVER_SOFTWARE".into(),
         "RustHTTP/1.0".into(),
     );
-    env.insert("GATEWAY_INTERFACE".into(), "CGI/1.1".into());
-    env.insert("REMOTE_ADDR".into(), peer_addr.to_string());
-    env.insert("REMOTE_PORT".into(), peer_port.to_string());
-    env.insert(
+    environment.insert("GATEWAY_INTERFACE".into(), "CGI/1.1".into());
+    environment.insert("REMOTE_ADDR".into(), peer_addr.to_string());
+    environment.insert("REMOTE_PORT".into(), peer_port.to_string());
+    environment.insert(
         "SCRIPT_NAME".into(),
         request.path().to_string(),
     );
-    if let Some(ct) = request.header("content-type") {
-        env.insert("CONTENT_TYPE".into(), ct.to_string());
+    if let Some(ct) = request.header("content-type") 
+    {
+        environment.insert("CONTENT_TYPE".into(), ct.to_string());
     }
-    if !request.body.is_empty() {
-        env.insert("CONTENT_LENGTH".into(), request.body.len().to_string());
+    if !request.body.is_empty() 
+    {
+        environment.insert("CONTENT_LENGTH".into(), request.body.len().to_string());
     }
 
     let script_dir = script_path.parent().unwrap_or(Path::new("."));
@@ -75,7 +79,7 @@ pub fn execute_cgi(
     let mut child = match Command::new(script_path)
         .current_dir(script_dir)
         .env_clear()
-        .envs(&env)
+        .envs(&environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -87,22 +91,28 @@ pub fn execute_cgi(
         }
     };
 
-    if !request.body.is_empty() {
-        if let Some(mut stdin) = child.stdin.take() {
+    if !request.body.is_empty() 
+    {
+        if let Some(mut stdin) = child.stdin.take() 
+        {
             let _ = stdin.write_all(&request.body);
         }
-    } else {
+    } 
+    else 
+    {
         drop(child.stdin.take());
     }
 
-    let output = match child.wait_with_output() {
+    let output = match child.wait_with_output() 
+    {
         Ok(o) => o,
         Err(e) => {
             return HttpResponse::internal_error(&format!("CGI execution failed: {}", e));
         }
     };
 
-    if !output.status.success() && output.stdout.is_empty() {
+    if !output.status.success() && output.stdout.is_empty() 
+    {
         return HttpResponse::internal_error("CGI script failed");
     }
 
@@ -117,11 +127,15 @@ headers\r\n\r\nbody  or  headers\n\nbody
 fn parse_cgi_output(output: &[u8]) -> HttpResponse {
     let output_str = String::from_utf8_lossy(output);
 
-    let (header_section, body) = if let Some(pos) = output_str.find("\r\n\r\n") {
+    let (header_section, body) = if let Some(pos) = output_str.find("\r\n\r\n") 
+    {
         (&output_str[..pos], &output[pos + 4..])
-    } else if let Some(pos) = output_str.find("\n\n") {
+    } 
+    else if let Some(pos) = output_str.find("\n\n") {
         (&output_str[..pos], &output[pos + 2..])
-    } else {
+    } 
+    else 
+    {
         let mut resp = HttpResponse::ok();
         resp.set_body(output.to_vec(), "text/html");
         return resp;
@@ -133,14 +147,17 @@ fn parse_cgi_output(output: &[u8]) -> HttpResponse {
     let mut extra_headers: Vec<(String, String)> = Vec::new();
 
     for line in header_section.lines() {
-        if let Some((key, value)) = line.split_once(':') {
+        if let Some((key, value)) = line.split_once(':') 
+        {
             let key = key.trim();
             let value = value.trim();
-            match key.to_lowercase().as_str() {
+            match key.to_lowercase().as_str() 
+            {
                 "content-type" => content_type = value.to_string(),
                 "status" => {
                     let parts: Vec<&str> = value.splitn(2, ' ').collect();
-                    if let Some(code) = parts.first().and_then(|c| c.parse().ok()) {
+                    if let Some(code) = parts.first().and_then(|c| c.parse().ok()) 
+                    {
                         status_code = code;
                         status_text = parts.get(1).unwrap_or(&"OK").to_string();
                     }
@@ -180,9 +197,12 @@ pub fn send_cgi_response(
 ) -> std::io::Result<()> {
     let response = execute_cgi(script_path, request, vhost, peer_addr, peer_port, server_port);
 
-    if response.headers.is_empty() {
+    if response.headers.is_empty() 
+    {
         stream.write_all(&response.body)?;
-    } else {
+    } 
+    else 
+    {
         stream.write_all(&response.serialize())?;
     }
 

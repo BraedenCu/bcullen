@@ -49,26 +49,32 @@ fn main() {
         .expect("Failed to spawn management thread");
 
     // carries choice of processing mode (ether threaded or select loops)
-    match &config.processing_mode {
+    match &config.processing_mode 
+    {
         // Spawn nThreads, keeping N workers idle while connections exist on shared channel,
         // think waiters rotating between tables at a restaurant. Blocked on slow client, as thread
         // sleeps. Apache
-        ProcessingMode::Threads(n) => {
+        ProcessingMode::Threads(n) => 
+        {
             server::run_threaded(state, *n);
         }
         // N event loops all multiplex many connections w/ mio, which wrapps epoll. Nice
         // because it is way more scalable under high load. Will not be blocked on a slow client. 
         // Nginx
-        ProcessingMode::SelectLoops(n) => {
+        ProcessingMode::SelectLoops(n) => 
+        {
             select_loop::run_select(state, *n);
         }
     }
 }
 
-fn parse_args(args: &[String]) -> Option<String> {
+fn parse_args(args: &[String]) -> Option<String> 
+{
     let mut i = 1;
-    while i < args.len() {
-        if args[i] == "-config" && i + 1 < args.len() {
+    while i < args.len() 
+    {
+        if args[i] == "-config" && i + 1 < args.len() 
+        {
             return Some(args[i + 1].clone());
         }
         i += 1;
@@ -92,11 +98,13 @@ worker threads get error on channel.recv(), breaking out of their loops
                 v
 main threads join all workers and process exists
 */
-fn management_terminal(state: &ServerState) {
+fn management_terminal(state: &ServerState) 
+{
     let stdin = io::stdin();
     println!("Management terminal ready. Commands: shutdown, status");
 
-    for line in stdin.lock().lines() {
+    for line in stdin.lock().lines() 
+    {
         let line = match line {
             Ok(l) => l,
             Err(_) => break,
@@ -104,7 +112,8 @@ fn management_terminal(state: &ServerState) {
 
         let cmd = line.trim().to_lowercase();
 
-        match cmd.as_str() {
+        match cmd.as_str() 
+        {
             // Graceful shutdown, we flip atomic flags (shutdown) and cleanly exit. Critically
             // the server workers will keep running until they complete in flight connections. 
             "shutdown" => {

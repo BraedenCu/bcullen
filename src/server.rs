@@ -11,16 +11,20 @@ use crate::connection::handle_connection;
 /*
 Shared server state, accessible from all threads
 */
-pub struct ServerState {
+pub struct ServerState 
+{
     pub config: ServerConfig,
     pub shutdown: AtomicBool,
     pub active_connections: AtomicUsize,
     pub accepting: AtomicBool,
 }
 
-impl ServerState {
-    pub fn new(config: ServerConfig) -> Self {
-        ServerState {
+impl ServerState 
+{
+    pub fn new(config: ServerConfig) -> Self 
+    {
+        ServerState 
+        {
             config,
             shutdown: AtomicBool::new(false),
             active_connections: AtomicUsize::new(0),
@@ -28,9 +32,11 @@ impl ServerState {
         }
     }
 
-    pub fn is_overloaded(&self) -> bool {
-        //overloaded if more connections than 10x thread count
-        let max = match &self.config.processing_mode {
+    pub fn is_overloaded(&self) -> bool 
+    {
+        // overloaded if more connections than 10x thread count avail
+        let max = match &self.config.processing_mode 
+        {
             ProcessingMode::Threads(n) => n * 10,
             ProcessingMode::SelectLoops(n) => n * 10,
         };
@@ -38,7 +44,8 @@ impl ServerState {
     }
 }
 
-pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) {
+pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) 
+{
     let addr = format!("0.0.0.0:{}", state.config.listen_port);
     let listener = TcpListener::bind(&addr).unwrap_or_else(|e| {
         eprintln!("Failed to bind to {}: {}", addr, e);
@@ -51,7 +58,8 @@ pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) {
 
     println!("Server listening on {}", addr);
     println!("Thread pool size: {}", n_threads);
-    for vh in &state.config.virtual_hosts {
+    for vh in &state.config.virtual_hosts 
+    {
         println!(
             "  VirtualHost: {} -> {}",
             vh.server_name,
@@ -63,30 +71,37 @@ pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) {
     let receiver = Arc::new(Mutex::new(receiver));
 
     let mut workers = Vec::new();
-    for id in 0..n_threads {
+    for id in 0..n_threads 
+    {
         let receiver = Arc::clone(&receiver);
         let state = Arc::clone(&state);
         let handle = thread::Builder::new()
             .name(format!("worker-{}", id))
-            .spawn(move || {
-                loop {
+            .spawn(move || 
+                {
+                loop 
+                {
                     let stream = {
                         let lock = receiver.lock().unwrap();
                         lock.recv()
                     };
 
-                    match stream {
-                        Ok(stream) => {
+                    match stream 
+                    {
+                        Ok(stream) => 
+                        {
                             state.active_connections.fetch_add(1, Ordering::Relaxed);
                             handle_connection(stream, &state);
                             state.active_connections.fetch_sub(1, Ordering::Relaxed);
                         }
-                        Err(_) => {
+                        Err(_) => 
+                        {
                             break;
                         }
                     }
                 }
             })
+            // write to stderr
             .unwrap_or_else(|e| {
                 eprintln!("Failed to spawn worker thread {}: {}", id, e);
                 std::process::exit(1);
@@ -94,32 +109,41 @@ pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) {
         workers.push(handle);
     }
 
-    loop {
-        if state.shutdown.load(Ordering::Relaxed) {
+    loop 
+    {
+        if state.shutdown.load(Ordering::Relaxed) 
+        {
             break;
         }
 
-        match listener.accept() {
-            Ok((stream, _addr)) => {
+        match listener.accept() 
+        {
+            Ok((stream, _addr)) => 
+            {
                 stream.set_nonblocking(false).ok();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(3)))
                     .ok();
 
-                if state.shutdown.load(Ordering::Relaxed) {
+                if state.shutdown.load(Ordering::Relaxed) 
+                {
                     break;
                 }
 
-                if sender.send(stream).is_err() {
+                if sender.send(stream).is_err() 
+                {
                     break;
                 }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => 
+            {
                 thread::sleep(Duration::from_millis(50));
                 continue;
             }
-            Err(e) => {
-                if !state.shutdown.load(Ordering::Relaxed) {
+            Err(e) => 
+            {
+                if !state.shutdown.load(Ordering::Relaxed) 
+                {
                     eprintln!("Accept error: {}", e);
                 }
                 break;
@@ -130,9 +154,10 @@ pub fn run_threaded(state: Arc<ServerState>, n_threads: usize) {
     state.accepting.store(false, Ordering::Relaxed);
     drop(sender);
 
-    println!("Waiting for workers to finish...");
-    for handle in workers {
+    println!("waiting on workers to finish");
+    for handle in workers 
+    {
         let _ = handle.join();
     }
-    println!("Server shut down.");
+    println!("server shut down");
 }
