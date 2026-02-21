@@ -48,8 +48,8 @@ impl HttpResponse {
         bytes
     }
 
-    pub fn serialize_chunked(headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
-        let mut out = String::from("HTTP/1.1 200 OK\r\n");
+    pub fn serialize_chunked(status_code: u16, status_text: &str, headers: &[(String, String)], body: &[u8]) -> Vec<u8> {
+        let mut out = format!("HTTP/1.1 {} {}\r\n", status_code, status_text);
         for (key, value) in headers {
             out.push_str(&format!("{}: {}\r\n", key, value));
         }

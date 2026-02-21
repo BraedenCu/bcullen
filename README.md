@@ -2,6 +2,30 @@
 
 ___
 
+## Directory Structure
+
+```bash
+Cargo.toml              # Rust project manifest (mio base64)
+Cargo.lock              # version & build consistency control
+README.md               # Contains written responses & project info
+src/
+- main.rs               # entry point, CLI parsing, management terminal
+- config.rs             # Apache-style config file parser
+- server.rs             # Thread pool mode (nThreads), ServerState
+- select_loop.rs        # Event loop mode (nSelectLoops) using mio
+- connection.rs         # Blocking connection handler (thread pool mode)
+- request.rs            # HTTP request parser (GET, POST)
+- response.rs           # HTTP response builder and serialization
+- router.rs             # URL routing, auth, content negotiation
+- cgi.rs                # CGI script execution (RFC 3875)
+- mime.rs               # type detection by file extension
+- util.rs               # HTTP date formatting and parsing
+```
+
+Dependencies: the mio crate is used in select_loops.rs for the event loop mode. It wraps OS level async I/O behind a unified API. Without mio syscalls would have to be used directly. the base64 crate provides fast base64 encoding and decoding used in router.rs for auth purposes.
+
+___
+
 ## Program Flow
 
 ```text
@@ -116,11 +140,20 @@ The server listens on the port specified in the config (default: 6789). A manage
 # build 
 cargo build
 
+# build a binary (binary saved to target/release/networks_http_server)
+cargo build --release 
+
 # thread pool mode
 cargo run -- -config http-meeting/test-http-threads.conf
 
 # select loop mode
 cargo run -- -config http-meeting/test-http.conf
+
+# alternatively, run the binary in thread pool mode
+./target/release/networks_http_server -config http-meeting/test-http-threads.conf
+
+# or run the binary in select loop mode
+./target/release/networks_http_server -config http-meeting/test-http.conf
 ```
 
 ### Test Cases
@@ -128,43 +161,45 @@ cargo run -- -config http-meeting/test-http.conf
 With the server running, tests should be run from a separate terminal
 
 ```bash
-# Target 1: Basic GET (expect 200 with Date, Server, Content-Type, Content-Length, Last-Modified)
+# tgt 1: basic GET (expect 200 with Date, Server, Content-Type, Content-Length, Last-Modified)
 curl -v http://localhost:6789/index.html
 curl -v http://localhost:6789/index.txt
 
-# Target 2: Timeout (connect via telnet, wait without sending — disconnects after 3s)
+# tgt 2: timeout (connect via telnet, wait without sending — disconnects after 3s)
 telnet localhost 6789
 
-# Target 3: Virtual host routing (should return different content per host)
+# tgt 3: virtual host routing (should return different content per host)
 curl -v -H "Host: host1.cs.yale.edu" http://localhost:6789/index.html
 curl -v -H "Host: host2.cs.yale.edu" http://localhost:6789/index.html
 
-# Target 4: Accept header validation (first = 406, second = 200)
+# tgt 4: accept header validation (first = 406, second = 200)
 curl -v -H "Accept: a/b" http://localhost:6789/index.html
 curl -v -H "Accept: */*" http://localhost:6789/index.html
 
-# Target 5: Mobile User-Agent detection (should serve index_m.html)
+# tgt 5: mobile user agent detection (should serve index_m.html)
 curl -v -H "User-Agent: my-iPhone" http://localhost:6789/
 
-# Target 6: If-Modified-Since (200 for old date, 304 for future date)
+# tgt 6: if-Modified-Since (200 for old date, 304 for future date)
 curl -v -H "If-Modified-Since: Thu, 14 Dec 2000 19:29:46 GMT" http://localhost:6789/index.html
 curl -v -H "If-Modified-Since: Thu, 14 Dec 2050 19:29:46 GMT" http://localhost:6789/index.html
 
-# Target 7: Connection keep-alive vs close
+# tgt 7: connection keep-alive vs close
 curl -v -H "Connection: close" http://localhost:6789/index.html
 curl -v -H "Connection: keep-alive" http://localhost:6789/index.html
 
-# Target 8: Basic authentication (401 without creds, 200 with creds)
+# tgt 8: basic authentication (401 without creds, 200 with creds)
 curl -v http://localhost:6789/protect/index.html
 curl -v http://cs434:passw0rd.@localhost:6789/protect/index.html
 
-# Target 9: CGI POST
+# tgt 9: CGT post
 curl -v -X POST -H "Content-Type: application/x-www-form-urlencoded" \
   -d "param1=val&param2=val" http://localhost:6789/test-cgi.cgi
 
 # Target 10: Graceful shutdown
-#   Terminal 1: curl -v --limit-rate 2K http://localhost:6789/data.txt
-#   Terminal 2 (server): type "shutdown" — server finishes the download then exits
+#   In terminal 1: 
+    curl -v --limit-rate 2K http://localhost:6789/data.txt
+#   In terminal 2 (server): 
+    # type "shutdown" — server finishes the download then exits
 
 # Target 12: Load endpoint (200 = healthy, 503 = overloaded)
 curl -v http://localhost:6789/load
@@ -218,7 +253,7 @@ handleLoopException(t);
 }
 ```
 
-Netty event loop sets a percentage for the amount of time  to be spent on I/O in an event loop, critically this default is set at 50 percent and thus time will be evenly split between I/O and non-I/O activities. The algorithm works as follows: it first checks if ioRatio equals 0, if so: do I/O operations then run all queued tasks with no time budgeting for I/O. Otherwise, measure time spent using I/O and compute a budget for task execution and run tasks up to that time budget.
+Netty event loop sets a percentage for the amount of time to be spent on I/O in an event loop, critically this default is set at 50 percent and thus time will be evenly split between I/O and non-I/O activities. The algorithm works as follows: it first checks if ioRatio equals 100, if so: do I/O operations then run all queued tasks with no time budgeting. Otherwise, measure time spent on I/O and compute a budget for task execution using the formula ioTime * (100 - ioRatio) / ioRatio', then run tasks up to that time budget. For example, with the default ioRatio of 50, tasks get equal time to I/O; with ioRatio of 80, tasks get only 25% of the time that I/O received.
 
 **c. A major novel, interesting feature of Netty is ChannelPipeline. A pipeline may consist of a list of ChannelHander. Please scan Netty implementation and give a high-level description of how ChannelPipeline is implemented. Compare HTTP Hello World Server and HTTP Snoop Server, what are the handlers that each includes?**
 
@@ -281,7 +316,7 @@ Compare and contrasting of the two:
 - Hello world server uses HttpServerCodec which is a single handler that does both decoding and encoding.
 - Snoop server splits the codec into separate Decoder and Encoder, but it has the same functionality as the HttpServerCodec
 - The hello world server delivers a fixed response and has a simple implementation. No aggregator is needed because the handler only needs minimal request info and additionally it can work on decoded messages. You can optionally add in HttpContentCompressor header to compress the fixed size body.
-- The snoop server instead needs access to the entire request body and headers into order to return them back. It includes the HttpObjectAggregator before running the HttpSnoopServerHandler to define the full request object. It does not have a compressor.
+- The snoop server processes HTTP messages piece by piece (HttpRequest, HttpContent, LastHttpContent) without aggregation. Aggregation is the process by which all pieces of a single HTTP message are collected into a single object before being passed along to teh handler. HttpSnoopServerHandler handles each message type individually, inspecting headers and content chunks as they arrive rather than buffering the full request. It does not use an aggregator or compressor.
 - In both server implementations, the last handler (HttpHelloWorldServerHandler vs HttpSnoopServerHandler) is an inbound application handler that determines exactly which responses need to be sent.
 
 **d. Method calls such as bind return ChannelFuture. Please describe how one may implement the sync method of a future.**
@@ -355,23 +390,27 @@ struct EventLoop {
   // also need I/O poller, connection table, etc
 }
 impl EventLoop {
-  fn add_timer(&mut self, conn: ConnId, delay_ms: u64, handler: fn(&mut EventLoop, ConnId)) { 
+  fn add_timer(&mut self, conn: ConnectionID, delay_ms: u64, handler: fn(&mut EventLoop, ConnectionID)) { 
     let now = now_ms(); 
     let mut ev = Event { 
       data: conn, 
       handler, 
-      expires_at_ms: now + delay_ms, 
+      expires_ms: now + delay_ms, 
     }; 
-    self.timers.push((ev.expires_at_ms, ev)); 
+    self.timers.push((ev.expires_ms, ev)); 
   }
-  fn cancel_timer(&mut self, conn: ConnId) { 
+  fn cancel_timer(&mut self, conn: ConnectionID) { 
     mark_timer_cancelled(conn); 
   }
   fn run(&mut self) {
     loop {
       let now = now_ms();
       let timeout_ms = if let Some((expires_at, _)) = self.timers.peek() {
-      if *expires_at <= now { 0 } else { *expires_at - now }
+      if *expires_at <= now { 
+        0 
+      } else { 
+        *expires_at - now 
+      }
       } else {
         DEFAULT_POLL_TIMEOUT_MS
       };
@@ -382,17 +421,20 @@ impl EventLoop {
         if expires_at > now {
           break;
         }
-        self.timers.pop()
+        self.timers.pop();
         if is_timer_cancelled(ev.data) {
           continue;
         }
-        (ev.handler)(self, ev.data) 
+        (ev.handler)(self, ev.data);
+      }
+    }
+  }
 }
-fn install_3s_timeout(loop_: &mut EventLoop, conn: ConnId) {
-  loop_.add_timer(conn, 3000, timeout_handler);
+fn install_3s_timeout(looping: &mut EventLoop, conn: ConnectionID) {
+  looping.add_timer(conn, 3000, timeout_handler);
 }
-fn timeout_handler(loop_: &mut EventLoop, conn: ConnId) {
-  close_connection(loop_, conn);
+fn timeout_handler(looping: &mut EventLoop, conn: ConnectionID) {
+  close_connection(looping, conn);
 }
 ```
 
@@ -406,7 +448,7 @@ nginx organizes request handling into 11 phases. The phases are as follows, with
 4. NGX_HTTP_REWRITE_PHASE --> associated checker: ngx_http_core_rewrite_phase
 5. NGX_HTTP_POST_REWRITE_PHASE --> associated checker: ngx_http_core_post_rewrite_phase
 6. NGX_HTTP_PREACCESS_PHASE --> associated checker: ngx_http_core_generic_phase
-7. ACCESNGX_HTTP_ACCESS_PHASES --> associated checker: ngx_http_core_access_phase
+7. NGX_HTTP_ACCESS_PHASE --> associated checker: ngx_http_core_access_phase
 8. NGX_HTTP_POST_ACCESS_PHASE --> associated checker: ngx_http_core_post_access_phase
 9. NGX_HTTP_TRY_FILES_PHASE --> associated checker: ngx_http_core_try_files_phase
 10. NGX_HTTP_CONTENT_PHASE --> associated checker: ngx_http_core_content_phase

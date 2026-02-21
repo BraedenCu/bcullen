@@ -42,6 +42,7 @@ pub enum ParseError {
     IoError(std::io::Error),
     ConnectionClosed,
     Timeout,
+    Incomplete,
 }
 
 impl From<std::io::Error> for ParseError {

@@ -87,7 +87,6 @@ pub fn execute_cgi(
         }
     };
 
-    // write body to stdin for POST
     if !request.body.is_empty() {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(&request.body);
@@ -96,7 +95,6 @@ pub fn execute_cgi(
         drop(child.stdin.take());
     }
 
-    // read stdout
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(e) => {
@@ -160,12 +158,11 @@ fn parse_cgi_output(output: &[u8]) -> HttpResponse {
     headers.push(("Content-Type".into(), content_type));
     headers.extend(extra_headers);
 
-    let response_bytes = HttpResponse::serialize_chunked(&headers, body);
+    let response_bytes = HttpResponse::serialize_chunked(status_code, &status_text, &headers, body);
 
     let mut resp = HttpResponse::new(status_code, &status_text);
-    resp.set_header("Content-Type", "text/html");
+    resp.headers.clear();
     resp.body = response_bytes;
-    resp.headers.clear(); 
     resp
 }
 

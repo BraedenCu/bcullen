@@ -59,7 +59,8 @@ fn resolve_path(uri_path: &str, request: &HttpRequest, vhost: &VirtualHost) -> O
     if uri_path.ends_with('/') || uri_path == "/" {
         let dir = vhost.document_root.join(clean);
 
-        if is_mobile_user_agent(request) {
+        // mobile detection only applies to request for /
+        if uri_path == "/" && is_mobile_user_agent(request) {
             let mobile_index = dir.join("index_m.html");
             if mobile_index.is_file() {
                 return Some(mobile_index);

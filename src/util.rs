@@ -5,7 +5,7 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-// SystemTime as an HTTP date (RFC 7231).
+// systime as an HTTP date (RFC 7231)
 pub fn format_http_date(time: SystemTime) -> String {
     let duration = time
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -20,7 +20,7 @@ pub fn format_http_date(time: SystemTime) -> String {
     )
 }
 
-// RFC 7231 / RFC 850 / asctime into SystemTime.
+// RFC 7231 into systime
 pub fn parse_http_date(s: &str) -> Option<SystemTime> {
     let s = s.trim();
     let parts: Vec<&str> = s.split_whitespace().collect();

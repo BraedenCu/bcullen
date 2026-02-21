@@ -319,19 +319,21 @@ fn handle_read(conn: &mut Connection, state: &ServerState, _poll: &Poll) -> bool
         let request_data = conn.read_buf.clone();
         match parse_request_from_buffer(&request_data, header_end) {
             Ok((request, consumed)) => {
-                // det keep-alive
                 let connection_header = request
                     .header("connection")
                     .unwrap_or("keep-alive")
                     .to_lowercase();
                 conn.keep_alive = connection_header != "close";
-                // create response
                 let response_bytes = process_request(request, state, &conn.peer_ip, conn.peer_port);
                 conn.write_buf = response_bytes;
                 conn.read_buf.drain(..consumed);
                 conn.state = ConnState::WritingResponse;
 
                 return true;
+            }
+            Err(ParseError::Incomplete) => {
+                // post body not fully received yet so we gotta stay in ReadingRequest
+                return false;
             }
             Err(_) => {
                 let resp = HttpResponse::bad_request("Malformed request");
@@ -437,9 +439,8 @@ fn parse_request_from_buffer(
                     body = buf[consumed..body_end].to_vec();
                     consumed = body_end;
                 } else {
-                    // edge case we dont deal with
-                    body = buf[consumed..].to_vec();
-                    consumed = buf.len();
+                    // Not enough data yet, wait for more reads
+                    return Err(ParseError::Incomplete);
                 }
             }
         }
@@ -516,7 +517,7 @@ fn process_request(
                 state.config.listen_port,
             );
             if resp.headers.is_empty() {
-                // Raw CGI response
+                // raw cgi response
                 resp.body
             } else {
                 resp.serialize()
