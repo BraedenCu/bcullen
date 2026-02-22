@@ -15,6 +15,12 @@ pub enum ProcessingMode
     SelectLoops(usize),
 }
 
+/*
+Instead of recommended hash map, typed struct is used.
+The typed struct is great because we get compile-time type
+safety rather than string lookups (with hash maps). We still
+follow the httpd.conf template tho.
+*/
 #[derive(Debug, Clone)]
 pub struct ServerConfig 
 {

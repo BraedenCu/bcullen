@@ -42,6 +42,12 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
             .to_lowercase();
         let keep_alive = connection_header != "close";
 
+        /* 
+        synchronous, (runs inside per connection handler on worker thread)
+        thread reads the req, checks for /load, writes response directly to
+        tcpstream. This would integrate w/ a load balancer here. Like the Amazon
+        ALB. 
+        */
         if request.path() == "/load" && request.method == Method::Get 
         {
             let resp = if state.accepting.load(std::sync::atomic::Ordering::Relaxed)
@@ -79,7 +85,8 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
         let vhost = state.config.find_host(hostname);
 
         match route_request(request, vhost) {
-            RouteResult::Response(mut resp) => {
+            RouteResult::Response(mut resp) => 
+            {
                 resp.set_header(
                     "Connection",
                     if keep_alive { "keep-alive" } else { "close" },

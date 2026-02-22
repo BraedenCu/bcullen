@@ -68,9 +68,12 @@ impl Connection
 }
 
 /*
-Start server w/ n select/poll event loops note symmetric design chosen. We will have
+Start server w/ n select/poll event loops note asymmetric design chosen. We will have
 each loop handle its own connections and the main thread will accept and route 
-connections via channels.
+connections via channels. Responsibilities are not interchangable, main thread does just
+one job (accepting + distributing) and teh workers do diff jobs (process events).
+We use round robin distribution. Tradeoff is that theres a single bottleneck for accepting
+connections.
 */
 pub fn run_select(state: Arc<ServerState>, n_loops: usize) 
 {
@@ -95,7 +98,7 @@ pub fn run_select(state: Arc<ServerState>, n_loops: usize)
         );
     }
 
-    // Create channels to dispatch connections to event loops
+    // create channels to dispatch connections to event loops
     let mut senders = Vec::new();
     let mut loop_handles = Vec::new();
 
@@ -117,7 +120,7 @@ pub fn run_select(state: Arc<ServerState>, n_loops: usize)
         loop_handles.push(handle);
     }
 
-    // Accept loop — round robin to event loops
+    // round robin to event loops
     let mut next_loop = 0;
     loop 
     {
@@ -131,7 +134,6 @@ pub fn run_select(state: Arc<ServerState>, n_loops: usize)
             {
                 state.active_connections.fetch_add(1, Ordering::Relaxed);
 
-                // Convert std TcpStream to mio TcpStream
                 stream.set_nonblocking(true).ok();
                 let mio_stream = MioTcpStream::from_std(stream);
 
@@ -551,6 +553,13 @@ fn process_request(
         .to_lowercase();
     let keep_alive = connection_header != "close";
 
+    /*
+    runs inside nonblocking event loop checks during request ready
+    event calback. returns serialized response bytes which the event
+    loop then queues for nonblocking writes back. At this point load 
+    balancer would come in to determine which backend server gets
+    the next client req.
+     */
     if request.path() == "/load" && request.method == Method::Get 
     {
         let mut resp = if state.accepting.load(Ordering::Relaxed) && !state.is_overloaded() {

@@ -36,7 +36,7 @@ ___
                           -----------------------------------
                                       │
                      -----------------------------------
-                     │          ProcessingMode?        │
+                     │          what ProcessingMode?   │
                      v                                 v
           --------------------              -----------------------
           │   server.rs      │              │   select_loop.rs    │
@@ -58,8 +58,8 @@ ___
   │  connection.rs       │      │  Per-connection state machine    │
   │  handle_connection() │      │  ConnState:                      │
   │  (blocking I/O,      │      │    ReadingRequest                │
-  │   loop for           │      │    WritingResponse               │
-  │   keep-alive)        │      │    Done                          │
+  │   loop for keep      │      │    WritingResponse               │
+  │   alive)             │      │    Done                          │
   ------------------------      │  mio::Poll for readiness events  │
             │                   ------------------------------------
             │                          │
@@ -69,64 +69,48 @@ ___
     ----------------------------------------
     │          Request Pipeline            │
     │                                      │
-    │  1. request.rs :: parse_request()    │
+    │  1. request.rs -> parse_request()    │
     │     Parse method, URI, headers, body │
     │                                      │
     │  2. /load check (special endpoint)   │
     │     200 if healthy, 503 if overloaded│
     │                                      │
-    │  3. config.rs :: find_host()         │
+    │  3. config.rs -> find_host()         │
     │     Match Host header → VirtualHost  │
     │                                      │
-    │  4. router.rs :: route_request()     │
-    │     ├─ resolve_path()                │
-    │     │   ├─ Map URI → DocumentRoot    │
-    │     │   ├─ Directory → index.html    │
-    │     │   └─ Mobile → index_m.html     │
-    │     ├─ Path traversal protection     │
-    │     ├─ .htaccess auth check          │
-    │     └─ Executable? → CGI or Static   │
+    │  4. router.rs -> route_request()     │
+    │     - resolve_path()                 │
+	│     - map URI -> DocumentRoot        │
+	│     - directory -> index.html        │
+	│   - Mobile -> index_m.html           │
+	│     - Path traversal protection      │
+	│     - .htaccess auth check           │
+	│     - Executable? -> CGI or Static   │
     │                                      │
     │  5a. Static file:                    │
-    │      ├─ mime.rs :: mime_from_ext()   │
-    │      ├─ Accept header validation     │
-    │      ├─ If-Modified-Since → 304      │
-    │      └─ Read file → 200 response     │
+    │      - mime.rs -> mime_from_ext()    │
+    │      - accept header validation      │
+    │      - if modified since -> 304      │
+    │      - read file -> 200 response     │
     │                                      │
     │  5b. CGI script:                     │
-    │      ├─ cgi.rs :: execute_cgi()      │
-    │      ├─ Set RFC 3875 env vars        │
-    │      ├─ Fork/exec, pipe stdin/out    │
-    │      └─ Chunked transfer encoding    │
+    │      - cgi.rs -> execute_cgi()       │
+    │      - Set RFC 3875 env vars         │
+    │      - Fork/exec, pipe stdin/out     │
+    │      - Chunked transfer encoding     │
     │                                      │
-    │  6. response.rs :: serialize()       │
+    │  6. response.rs -> serialize()       │
     │     Build HTTP/1.1 wire format       │
     ----------------------------------------
 
     ----------------------------------------
     │         Shared State (Arc)           │
     │                                      │
-    │  server.rs :: ServerState            │
-    │  ├─ config: ServerConfig             │
-    │  ├─ shutdown: AtomicBool             │
-    │  ├─ accepting: AtomicBool            │
-    │  └─ active_connections: AtomicUsize  │
-    ----------------------------------------
-
-    ----------------------------------------
-    │         Source File Map              │
-    │                                      │
-    │  main.rs ------- Entry, CLI, mgmt    │
-    │  config.rs ----- Apache-style parse  │
-    │  server.rs ----- Thread pool mode    │
-    │  select_loop.rs  Event loop mode     │
-    │  connection.rs - Blocking handler    │
-    │  request.rs ---- HTTP request parse  │
-    │  response.rs --- HTTP response build │
-    │  router.rs ----- URL routing, auth   │
-    │  cgi.rs -------- CGI execution       │
-    │  mime.rs ------- MIME type lookup    │
-    │  util.rs --------Date formatting     │
+    │  server.rs -> ServerState            │
+    │  - config: ServerConfig              │
+    │  - shutdown: AtomicBool              │
+    │  - accepting: AtomicBool             │
+    │  - active_connections: AtomicUsize   │
     ----------------------------------------
 ```
 
@@ -323,7 +307,7 @@ Compare and contrasting of the two:
 
 ChannelFuture.sync() waits for this future until it is done, and rethrows the cause of the failure if this future failed (according to the netty documentation).  At a high level sync has two main concerns, blocking and error propogation after completion. All sync is doing on ChannelFuture is blocking until the asynchronous operation is finished and if it has failed it will throw an error. One could implement this feature like so:
 
-1. one could check if the channelfuture is already done, if so return immedaitely or throw failure case
+1. one could check if the channelfuture is already done, if so return immediately or throw failure case
 2. if not, wait until completion crucially blocking the calling thread
 3. after completion, if the channelfuture failed, determine the cause and throw it. If cancelled, throw a cancellation exception and if it succeeded return the channelfuture.
 
@@ -380,49 +364,66 @@ Each nginx event has a timer lingage built into a red black tree of timers and e
 /*
 Rust psuedocode sketch
 */
-struct Event {
+struct Event 
+{
   data: ConnectionID,
   handler: fn(&mut EventLoop, ConnectionID),
   expires_ms: u64, 
 }
-struct EventLoop {
+struct EventLoop 
+{
   timers: BinaryHeap<(u64, Event)>, //min-heap expires_ms
   // also need I/O poller, connection table, etc
 }
-impl EventLoop {
-  fn add_timer(&mut self, conn: ConnectionID, delay_ms: u64, handler: fn(&mut EventLoop, ConnectionID)) { 
+impl EventLoop 
+{
+  fn add_timer(&mut self, conn: ConnectionID, delay_ms: u64, handler: fn(&mut EventLoop, ConnectionID)) 
+  { 
     let now = now_ms(); 
-    let mut ev = Event { 
+    let mut ev = Event 
+    { 
       data: conn, 
       handler, 
       expires_ms: now + delay_ms, 
     }; 
     self.timers.push((ev.expires_ms, ev)); 
   }
-  fn cancel_timer(&mut self, conn: ConnectionID) { 
+  fn cancel_timer(&mut self, conn: ConnectionID) 
+  { 
     mark_timer_cancelled(conn); 
   }
-  fn run(&mut self) {
-    loop {
+  fn run(&mut self) 
+  {
+    loop 
+    {
       let now = now_ms();
-      let timeout_ms = if let Some((expires_at, _)) = self.timers.peek() {
-      if *expires_at <= now { 
+      let timeout_ms = if let Some((expires_at, _)) = self.timers.peek() 
+      {
+      if *expires_at <= now 
+      { 
         0 
-      } else { 
+      } 
+      else 
+      { 
         *expires_at - now 
       }
-      } else {
+      } 
+      else 
+      {
         DEFAULT_POLL_TIMEOUT_MS
       };
       let io_events = poll_io(timeout_ms);
       self.handle_io(io_events);
       let now = now_ms();
-      while let Some((expires_at, mut ev)) = self.timers.peek().cloned() {
-        if expires_at > now {
+      while let Some((expires_at, mut ev)) = self.timers.peek().cloned() 
+      {
+        if expires_at > now 
+        {
           break;
         }
         self.timers.pop();
-        if is_timer_cancelled(ev.data) {
+        if is_timer_cancelled(ev.data) 
+        {
           continue;
         }
         (ev.handler)(self, ev.data);
@@ -430,10 +431,12 @@ impl EventLoop {
     }
   }
 }
-fn install_3s_timeout(looping: &mut EventLoop, conn: ConnectionID) {
+fn install_3s_timeout(looping: &mut EventLoop, conn: ConnectionID)
+ {
   looping.add_timer(conn, 3000, timeout_handler);
 }
-fn timeout_handler(looping: &mut EventLoop, conn: ConnectionID) {
+fn timeout_handler(looping: &mut EventLoop, conn: ConnectionID) 
+{
   close_connection(looping, conn);
 }
 ```
@@ -457,7 +460,7 @@ nginx organizes request handling into 11 phases. The phases are as follows, with
 **d. A main design feature of nginx is efficient support of upstream; that is, forward request to an upstream server. Can you describe the high level design?**
 
 Upstream support is designed around the ngx_http_upstream_t structure
-Upstream server groups are defined with the upstream block and references by directives like proxy_pass, fastcgi_pass, uwsgi_pass, etc. This configuration builds data structures which describe upstream peers, load-balancing, queues, etc. The kep high level design of upstream support involves calling a peer selection method (round robin, hash, random, etc) to choose a backend server from the upstream group. It then establishes a nonblocking connection (ngx_event_connect_peer) and establishes read/write events and timers on the upstream connection. Additionally, upstream i/o is fully asynchronous, and thus the upstream state machine uses two main event handlers on the upstream connection. One is used for reading into buffers, the other for writing a request into the bufers. When data arrives it is read into buffers and passed thru the HTTP output filter chain back to the client connection. Upstream responses are buffered in either memory or on disk. The same filter chain is used for local content and upstream responses. THe upstream core tracks timeouts, errors, and number of tries. On failure it will pick a suitable peer and rerun the connection path. This deisn is effective bdcause it isolates upstream machinery from specific protocols.
+Upstream server groups are defined with the upstream block and references by directives like proxy_pass, fastcgi_pass, uwsgi_pass, etc. This configuration builds data structures which describe upstream peers, load-balancing, queues, etc. The kep high level design of upstream support involves calling a peer selection method (round robin, hash, random, etc) to choose a backend server from the upstream group. It then establishes a nonblocking connection (ngx_event_connect_peer) and establishes read/w rite events and timers on the upstream connection. Additionally, upstream i/o is fully asynchronous, and thus the upstream state machine uses two main event handlers on the upstream connection. One is used for reading into buffers, the other for writing a request into the bufers. When data arrives it is read into buffers and passed thru the HTTP output filter chain back to the client connection. Upstream responses are buffered in either memory or on disk. The same filter chain is used for local content and upstream responses. The upstream core tracks timeouts, errors, and number of tries. On failure it will pick a suitable peer and rerun the connection path. This deisn is effective bdcause it isolates upstream machinery from specific protocols.
 
 **e. nginx introduces a buffer type ngx_buf_t. Please briefly compare ngx_buf_t vs ByteBuffer we covered for Java nio?**
 
