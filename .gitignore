@@ -2,7 +2,6 @@
 .DS_Store
 http-meeting/
 Thumbs.db
-.claude/
 target/
 Cargo.lock
 .idea/
