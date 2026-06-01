@@ -143,3 +143,123 @@ impl ServerConfig {
             .unwrap_or(self.default_host())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("bcullen-config-test-{}-{}", name, nonce))
+    }
+
+    #[test]
+    fn parses_listen_threads_and_virtual_hosts() {
+        let dir = temp_dir("valid");
+        let host1 = dir.join("host1");
+        let host2 = dir.join("host2");
+        fs::create_dir_all(&host1).unwrap();
+        fs::create_dir_all(&host2).unwrap();
+
+        let config_path = dir.join("httpd.conf");
+        fs::write(
+            &config_path,
+            r#"
+Listen 6789
+nThreads 8
+
+<VirtualHost *:6789>
+    DocumentRoot host1
+    ServerName host1.test
+</VirtualHost>
+
+<VirtualHost *:6789>
+    DocumentRoot host2
+    ServerName host2.test
+</VirtualHost>
+"#,
+        )
+        .unwrap();
+
+        let config = ServerConfig::parse(config_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(config.listen_port, 6789);
+        assert!(matches!(config.processing_mode, ProcessingMode::Threads(8)));
+        assert_eq!(config.virtual_hosts.len(), 2);
+        assert_eq!(
+            config.find_host("host2.test").document_root,
+            fs::canonicalize(&host2).unwrap()
+        );
+        assert_eq!(config.find_host("unknown.test").server_name, "host1.test");
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn parses_select_loop_mode() {
+        let dir = temp_dir("select");
+        let host = dir.join("host");
+        fs::create_dir_all(&host).unwrap();
+
+        let config_path = dir.join("httpd.conf");
+        fs::write(
+            &config_path,
+            r#"
+Listen 8080
+nSelectLoops 3
+<VirtualHost *:8080>
+    DocumentRoot host
+    ServerName host.test
+</VirtualHost>
+"#,
+        )
+        .unwrap();
+
+        let config = ServerConfig::parse(config_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(config.listen_port, 8080);
+        assert!(matches!(
+            config.processing_mode,
+            ProcessingMode::SelectLoops(3)
+        ));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_port_and_missing_document_root() {
+        let dir = temp_dir("invalid");
+        fs::create_dir_all(&dir).unwrap();
+
+        let invalid_port = dir.join("invalid-port.conf");
+        fs::write(&invalid_port, "Listen nope\n").unwrap();
+        assert!(
+            ServerConfig::parse(invalid_port.to_str().unwrap())
+                .unwrap_err()
+                .contains("Invalid port")
+        );
+
+        let missing_root = dir.join("missing-root.conf");
+        fs::write(
+            &missing_root,
+            r#"
+Listen 6789
+<VirtualHost *:6789>
+    ServerName host.test
+</VirtualHost>
+"#,
+        )
+        .unwrap();
+        assert!(
+            ServerConfig::parse(missing_root.to_str().unwrap())
+                .unwrap_err()
+                .contains("DocumentRoot")
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+}

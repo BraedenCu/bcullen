@@ -21,3 +21,33 @@ pub fn mime_from_extension(path: &Path) -> &'static str {
         _ => "application/octet-stream", // fallback
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_known_extensions_case_insensitively() {
+        assert_eq!(mime_from_extension(Path::new("index.html")), "text/html");
+        assert_eq!(mime_from_extension(Path::new("page.HTM")), "text/html");
+        assert_eq!(mime_from_extension(Path::new("notes.txt")), "text/plain");
+        assert_eq!(
+            mime_from_extension(Path::new("data.json")),
+            "application/json"
+        );
+        assert_eq!(mime_from_extension(Path::new("photo.JPG")), "image/jpeg");
+        assert_eq!(mime_from_extension(Path::new("script.cgi")), "text/html");
+    }
+
+    #[test]
+    fn falls_back_for_unknown_or_missing_extension() {
+        assert_eq!(
+            mime_from_extension(Path::new("archive.bin")),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            mime_from_extension(Path::new("Makefile")),
+            "application/octet-stream"
+        );
+    }
+}

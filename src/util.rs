@@ -96,8 +96,8 @@ fn days_in_month(y: i64, m: u32) -> u32 {
 
 fn unix_to_datetime(secs: i64) -> (i64, u32, u32, u32, u32, u32, u32) {
     let sec = secs.rem_euclid(60);
-    let min = (((secs / 60) % 60) + 60) % 60;
-    let hour = (((secs / 3600) % 24) + 24) % 24;
+    let min = (secs / 60).rem_euclid(60);
+    let hour = (secs / 3600).rem_euclid(24);
     let mut days = secs / 86400;
     let wday = ((days % 7 + 4) % 7 + 7) % 7;
 
@@ -147,4 +147,52 @@ fn datetime_to_unix(year: i64, month: u32, day: u32, hour: u32, min: u32, sec: u
     }
     days += (day as i64) - 1;
     days * 86400 + (hour as i64) * 3600 + (min as i64) * 60 + (sec as i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn formats_unix_epoch_with_correct_weekday() {
+        assert_eq!(
+            format_http_date(SystemTime::UNIX_EPOCH),
+            "Thu, 01 Jan 1970 00:00:00 GMT"
+        );
+    }
+
+    #[test]
+    fn parses_and_formats_round_trip() {
+        let date = "Tue, 15 Nov 1994 08:12:31 GMT";
+        let parsed = parse_http_date(date).expect("date should parse");
+
+        assert_eq!(format_http_date(parsed), date);
+    }
+
+    #[test]
+    fn handles_leap_day_round_trip() {
+        let date = "Thu, 29 Feb 2024 12:34:56 GMT";
+        let parsed = parse_http_date(date).expect("leap day should parse");
+
+        assert_eq!(format_http_date(parsed), date);
+    }
+
+    #[test]
+    fn rejects_malformed_dates() {
+        assert!(parse_http_date("not a date").is_none());
+        assert!(parse_http_date("Tue, 15 Nope 1994 08:12:31 GMT").is_none());
+        assert!(parse_http_date("Tue, 15 Nov 1994 08:12 GMT").is_none());
+    }
+
+    #[test]
+    fn parses_known_weekday_edge_case() {
+        let parsed = parse_http_date("Sat, 01 Jan 2000 00:00:00 GMT").expect("date should parse");
+
+        assert_eq!(
+            parsed.duration_since(SystemTime::UNIX_EPOCH).unwrap(),
+            Duration::from_secs(946684800)
+        );
+        assert_eq!(format_http_date(parsed), "Sat, 01 Jan 2000 00:00:00 GMT");
+    }
 }
