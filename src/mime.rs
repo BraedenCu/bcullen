@@ -5,8 +5,7 @@ mime (multipurpose internet mail extensions) format: type/subtype
 
 Leveraged when serving up a static file.
 */
-pub fn mime_from_extension(path: &Path) -> &'static str 
-{
+pub fn mime_from_extension(path: &Path) -> &'static str {
     match path
         .extension()                      // get the part after the last dot (jpg, html, etc)
         .and_then(|e| e.to_str())   // convert OsStr to &str 

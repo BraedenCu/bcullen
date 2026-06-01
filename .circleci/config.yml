@@ -1,0 +1,70 @@
+version: 2.1
+
+# CI gate for the bcullen HTTP/TCP stack.
+#
+# Establishes the validation baseline (issue #2): every PR must pass fmt, clippy
+# (warnings denied), and a locked build before it can be merged into main. The
+# pipeline is workspace-ready — the job commands already target the whole build,
+# so they keep working unchanged once the project becomes a Cargo workspace.
+#
+# Image: cimg/rust:1.86 — the project uses edition 2024, which requires Rust >= 1.85.
+
+executors:
+  rust:
+    docker:
+      - image: cimg/rust:1.86
+    resource_class: medium
+
+# Restore/save the cargo registry + git index + build cache, keyed on Cargo.lock so
+# the cache is reused until dependencies change.
+commands:
+  restore_cargo_cache:
+    steps:
+      - restore_cache:
+          keys:
+            - cargo-v1-{{ arch }}-{{ checksum "Cargo.lock" }}
+            - cargo-v1-{{ arch }}-
+  save_cargo_cache:
+    steps:
+      - save_cache:
+          key: cargo-v1-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - target
+
+jobs:
+  fmt:
+    executor: rust
+    steps:
+      - checkout
+      - run:
+          name: rustfmt (check)
+          command: cargo fmt --all --check
+
+  clippy:
+    executor: rust
+    steps:
+      - checkout
+      - restore_cargo_cache
+      - run:
+          name: clippy (deny warnings)
+          command: cargo clippy --all-targets --locked -- -D warnings
+      - save_cargo_cache
+
+  build:
+    executor: rust
+    steps:
+      - checkout
+      - restore_cargo_cache
+      - run:
+          name: build (locked)
+          command: cargo build --locked
+      - save_cargo_cache
+
+workflows:
+  validate:
+    jobs:
+      - fmt
+      - clippy
+      - build
