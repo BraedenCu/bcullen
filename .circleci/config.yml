@@ -1,0 +1,60 @@
+version: 2.1
+
+executors:
+  rust:
+    docker:
+      - image: cimg/rust:1.86.0
+    working_directory: ~/project
+
+commands:
+  restore_cargo_cache:
+    steps:
+      - restore_cache:
+          keys:
+            - cargo-v1-{{ arch }}-{{ checksum "Cargo.lock" }}
+            - cargo-v1-{{ arch }}-
+
+  save_cargo_cache:
+    steps:
+      - save_cache:
+          key: cargo-v1-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - target
+
+jobs:
+  fmt:
+    executor: rust
+    steps:
+      - checkout
+      - run:
+          name: Check formatting
+          command: cargo fmt --all --check
+
+  clippy:
+    executor: rust
+    steps:
+      - checkout
+      - restore_cargo_cache
+      - run:
+          name: Clippy
+          command: cargo clippy --all-targets -- -D warnings
+      - save_cargo_cache
+
+  build:
+    executor: rust
+    steps:
+      - checkout
+      - restore_cargo_cache
+      - run:
+          name: Build
+          command: cargo build --locked
+      - save_cargo_cache
+
+workflows:
+  validate:
+    jobs:
+      - fmt
+      - clippy
+      - build
