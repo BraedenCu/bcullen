@@ -2,13 +2,12 @@ use std::io::Write;
 use std::net::TcpStream;
 
 use crate::cgi::send_cgi_response;
-use crate::request::{parse_request, Method, ParseError};
+use crate::request::{Method, ParseError, parse_request};
 use crate::response::HttpResponse;
-use crate::router::{route_request, RouteResult};
+use crate::router::{RouteResult, route_request};
 use crate::server::ServerState;
 
-pub fn handle_connection(mut stream: TcpStream, state: &ServerState) 
-{
+pub fn handle_connection(mut stream: TcpStream, state: &ServerState) {
     let peer_addr = stream
         .peer_addr()
         .map(|a| a.to_string())
@@ -16,20 +15,16 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
 
     let (peer_ip, peer_port) = parse_peer_addr(&peer_addr);
 
-    loop 
-    {
-        let request = match parse_request(&mut stream) 
-        {
+    loop {
+        let request = match parse_request(&mut stream) {
             Ok(req) => req,
             Err(ParseError::ConnectionClosed) => break,
-            Err(ParseError::Timeout) => 
-            {
+            Err(ParseError::Timeout) => {
                 let resp = HttpResponse::bad_request("Request timeout");
                 let _ = stream.write_all(&resp.serialize());
                 break;
             }
-            Err(_) => 
-            {
+            Err(_) => {
                 let resp = HttpResponse::bad_request("Malformed request");
                 let _ = stream.write_all(&resp.serialize());
                 break;
@@ -40,25 +35,23 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
             .header("connection")
             .unwrap_or("keep-alive")
             .to_lowercase();
+        debug_assert!(request.has_valid_http_version());
         let keep_alive = connection_header != "close";
 
-        /* 
+        /*
         synchronous, (runs inside per connection handler on worker thread)
         thread reads the req, checks for /load, writes response directly to
         tcpstream. This would integrate w/ a load balancer here. Like the Amazon
-        ALB. 
+        ALB.
         */
-        if request.path() == "/load" && request.method == Method::Get 
-        {
+        if request.path() == "/load" && request.method == Method::Get {
             let resp = if state.accepting.load(std::sync::atomic::Ordering::Relaxed)
                 && !state.is_overloaded()
             {
                 let mut r = HttpResponse::ok();
                 r.set_body(b"OK".to_vec(), "text/plain");
                 r
-            } 
-            else 
-            {
+            } else {
                 HttpResponse::service_unavailable()
             };
 
@@ -85,8 +78,7 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
         let vhost = state.config.find_host(hostname);
 
         match route_request(request, vhost) {
-            RouteResult::Response(mut resp) => 
-            {
+            RouteResult::Response(mut resp) => {
                 resp.set_header(
                     "Connection",
                     if keep_alive { "keep-alive" } else { "close" },
@@ -110,32 +102,25 @@ pub fn handle_connection(mut stream: TcpStream, state: &ServerState)
             }
         }
 
-        if !keep_alive 
-        {
+        if !keep_alive {
             break;
         }
     }
 }
 
-fn parse_peer_addr(addr: &str) -> (String, u16) 
-{
-    if let Some(bracket_end) = addr.rfind(']') 
-    {
+fn parse_peer_addr(addr: &str) -> (String, u16) {
+    if let Some(bracket_end) = addr.rfind(']') {
         let ip = &addr[..=bracket_end];
         let port = addr[bracket_end + 1..]
             .trim_start_matches(':')
             .parse()
             .unwrap_or(0);
         (ip.to_string(), port)
-    } 
-    else if let Some(colon) = addr.rfind(':') 
-    {
+    } else if let Some(colon) = addr.rfind(':') {
         let ip = &addr[..colon];
         let port = addr[colon + 1..].parse().unwrap_or(0);
         (ip.to_string(), port)
-    } 
-    else
-    {
+    } else {
         (addr.to_string(), 0)
     }
 }
