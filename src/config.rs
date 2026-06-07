@@ -188,7 +188,10 @@ nThreads 8
         let config = ServerConfig::parse(config_path.to_str().unwrap()).unwrap();
 
         assert_eq!(config.listen_port, 6789);
-        assert!(matches!(config.processing_mode, ProcessingMode::Threads(8)));
+        assert!(matches!(
+            &config.processing_mode,
+            ProcessingMode::Threads(8)
+        ));
         assert_eq!(config.virtual_hosts.len(), 2);
         assert_eq!(
             config.find_host("host2.test").document_root,
