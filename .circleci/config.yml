@@ -62,9 +62,20 @@ jobs:
           command: cargo build --locked
       - save_cargo_cache
 
+  test:
+    executor: rust
+    steps:
+      - checkout
+      - restore_cargo_cache
+      - run:
+          name: test (locked)
+          command: cargo test --locked
+      - save_cargo_cache
+
 workflows:
   validate:
     jobs:
       - fmt
       - clippy
       - build
+      - test

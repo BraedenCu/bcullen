@@ -92,22 +92,24 @@ fn is_mobile_user_agent(request: &HttpRequest) -> bool {
 
 fn percent_decode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
-    let mut chars = s.bytes();
-    while let Some(b) = chars.next() {
-        if b == b'%' {
-            let hi = chars.next();
-            let lo = chars.next();
-            if let (Some(hi), Some(lo)) = (hi, lo) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{}{}", hi as char, lo as char), 16) {
-                    result.push(byte as char);
-                    continue;
-                }
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = bytes[i + 1] as char;
+            let lo = bytes[i + 2] as char;
+            if let Ok(byte) = u8::from_str_radix(&format!("{}{}", hi, lo), 16) {
+                result.push(byte as char);
+                i += 3;
+                continue;
             }
-            result.push('%');
-        } else {
-            result.push(b as char);
         }
+
+        result.push(bytes[i] as char);
+        i += 1;
     }
+
     result
 }
 
@@ -240,5 +242,156 @@ fn check_auth(file_path: &Path, request: &HttpRequest) -> Option<HttpResponse> {
             Some(HttpResponse::unauthorized(&auth_name))
         }
         _ => Some(HttpResponse::unauthorized(&auth_name)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::Method;
+    use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("bcullen-router-test-{}-{}", name, nonce))
+    }
+
+    fn request(uri: &str) -> HttpRequest {
+        HttpRequest {
+            method: Method::Get,
+            uri: uri.to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: HashMap::new(),
+            body: Vec::new(),
+        }
+    }
+
+    fn request_with_header(uri: &str, name: &str, value: &str) -> HttpRequest {
+        let mut req = request(uri);
+        req.headers.insert(name.to_lowercase(), value.to_string());
+        req
+    }
+
+    fn vhost(root: &Path) -> VirtualHost {
+        VirtualHost {
+            document_root: fs::canonicalize(root).unwrap(),
+            server_name: "example.test".to_string(),
+        }
+    }
+
+    fn response_status(result: RouteResult) -> u16 {
+        match result {
+            RouteResult::Response(resp) => resp.status_code,
+            RouteResult::Cgi { .. } => panic!("expected static response"),
+        }
+    }
+
+    #[test]
+    fn resolves_directory_to_index_html() {
+        let dir = temp_dir("index");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), "home").unwrap();
+
+        let result = route_request(request("/"), &vhost(&dir));
+
+        match result {
+            RouteResult::Response(resp) => {
+                assert_eq!(resp.status_code, 200);
+                assert_eq!(resp.body, b"home");
+            }
+            RouteResult::Cgi { .. } => panic!("expected static response"),
+        }
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn percent_decodes_file_paths() {
+        let dir = temp_dir("percent");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("space file.txt"), "decoded").unwrap();
+
+        let result = route_request(request("/space%20file.txt"), &vhost(&dir));
+
+        match result {
+            RouteResult::Response(resp) => {
+                assert_eq!(resp.status_code, 200);
+                assert_eq!(resp.body, b"decoded");
+            }
+            RouteResult::Cgi { .. } => panic!("expected static response"),
+        }
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn serves_mobile_index_for_iphone_user_agent() {
+        let dir = temp_dir("mobile");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), "desktop").unwrap();
+        fs::write(dir.join("index_m.html"), "mobile").unwrap();
+
+        let result = route_request(
+            request_with_header("/", "User-Agent", "Mozilla iPhone"),
+            &vhost(&dir),
+        );
+
+        match result {
+            RouteResult::Response(resp) => {
+                assert_eq!(resp.status_code, 200);
+                assert_eq!(resp.body, b"mobile");
+            }
+            RouteResult::Cgi { .. } => panic!("expected static response"),
+        }
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_path_traversal_outside_document_root() {
+        let dir = temp_dir("traversal");
+        let root = dir.join("root");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(dir.join("secret.txt"), "secret").unwrap();
+
+        let result = route_request(request("/../secret.txt"), &vhost(&root));
+
+        assert_eq!(response_status(result), 403);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn returns_not_found_for_missing_file() {
+        let dir = temp_dir("missing");
+        fs::create_dir_all(&dir).unwrap();
+
+        let result = route_request(request("/missing.txt"), &vhost(&dir));
+
+        assert_eq!(response_status(result), 404);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_unacceptable_accept_header() {
+        let dir = temp_dir("accept");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), "home").unwrap();
+
+        let result = route_request(
+            request_with_header("/index.html", "Accept", "image/png"),
+            &vhost(&dir),
+        );
+
+        assert_eq!(response_status(result), 406);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn percent_decode_preserves_invalid_escape() {
+        assert_eq!(percent_decode("/bad%zzescape"), "/bad%zzescape");
     }
 }
